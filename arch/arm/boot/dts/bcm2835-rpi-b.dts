@@ -50,3 +50,8 @@
 	status = "okay";
 	bus-width = <4>;
 };
+
+&pwm {
+	status = "okay";
+	clock-frequency = <100000000>;
+};

@@ -107,6 +107,14 @@
 			clocks = <&clk_mmc>;
 			status = "disabled";
 		};
+
+		pwm: pwm@2020c000 {
+			compatible = "brcm,bcm2835-pwm";
+			reg = <0x7e20c000 0x1000>;
+			clocks = <&clk_pwm>;
+			status = "disabled";
+			#pwm-cells = <2>;
+		};
 	};
 
 	clocks {
@@ -133,6 +141,13 @@
 			reg = <2>;
 			#clock-cells = <0>;
 			clock-frequency = <250000000>;
+		};
+
+		clk_pwm: pwm {
+			compatible = "fixed-clock";
+			reg = <3>;
+			#clock-cells = <0>;
+			clock-frequency = <100000000>;
 		};
 	};
 };

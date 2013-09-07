@@ -53,6 +53,14 @@ config PWM_ATMEL_TCB
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-atmel-tcb.
 
+config PWM_BCM2835
+	tristate "BCM2835 PWM support"
+	help
+	  Generic PWM framework driver for bcm2835 found on the Rasperry PI
+
+	  To compile this driver as a module, choose M here: the module will be
+	  called pwm-bcm2835
+
 config PWM_BFIN
 	tristate "Blackfin PWM support"
 	depends on BFIN_GPTIMERS
