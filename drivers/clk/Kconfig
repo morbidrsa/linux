@@ -64,6 +64,16 @@ config COMMON_CLK_SI5351
 	  This driver supports Silicon Labs 5351A/B/C programmable clock
 	  generators.
 
+config COMMON_CLK_SI570
+	tristate "Clock driver for SiLabs 570 and compatible devices"
+	depends on I2C
+	depends on OF
+	select REGMAP_I2C
+	help
+	---help---
+	  This driver supports Silicon Labs 570/571/598/599 programmable
+	  clock generators.
+
 config COMMON_CLK_S2MPS11
 	tristate "Clock driver for S2MPS11 MFD"
 	depends on MFD_SEC_CORE
@@ -92,6 +102,22 @@ config CLK_PPC_CORENET
 	---help---
 	  This adds the clock driver support for Freescale PowerPC corenet
 	  platforms using common clock framework.
+
+config COMMON_CLK_XGENE
+	bool "Clock driver for APM XGene SoC"
+	default y
+	depends on ARM64
+	---help---
+	  Sypport for the APM X-Gene SoC reference, PLL, and device clocks.
+
+config COMMON_CLK_KEYSTONE
+	tristate "Clock drivers for Keystone based SOCs"
+	depends on ARCH_KEYSTONE && OF
+	---help---
+          Supports clock drivers for Keystone based SOCs. These SOCs have local
+	  a power sleep control module that gate the clock to the IPs and PLLs.
+
+source "drivers/clk/msm/Kconfig"
 
 endmenu
 
