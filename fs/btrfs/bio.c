@@ -655,6 +655,63 @@ static bool btrfs_wq_submit_bio(struct btrfs_bio *bbio,
 	return true;
 }
 
+// TODO move to a more appropriate place
+static void parity_bbio_endio(struct btrfs_bio *parity_bbio)
+{
+}
+
+// TODO move to a more appropriate place
+static int btrfs_generate_parity_bbio(struct btrfs_bio *bbio,
+				      struct btrfs_io_context *bioc,
+				      u64 map_length)
+{
+	struct btrfs_fs_info *fs_info = bioc->fs_info;
+	u64 map_pages = map_length >> PAGE_SHIFT;
+	struct btrfs_bio *parity_bbio;
+	struct bvec_iter_all iter_all;
+	struct bio *bio = &bbio->bio;
+	struct bio_vec *bvec;
+	u64 length = bio->bi_iter.bi_size;
+	struct page *page;
+	int npages = 0;
+	blk_opf_t opf = REQ_OP_WRITE;
+
+	ASSERT(bbio_has_ordered_extent(bbio));
+
+	(void)fs_info;
+
+	/*
+	 * The general idea here is, iterate over all bvec_pages and for pages
+	 * in adjacent stripes calculate the parity.
+	 *
+	 * Of cause this will only work, if we do not need to do RMW or in our
+	 * case COW.
+	 */
+	printk("%s: length=%llu, map_length=%llu, map_pages=%llu\n",
+	       __func__, length, map_length, map_pages);
+
+	// if (can_use_zone_append)
+	//	opf = REQ_OP_ZONE_APPEND;
+	parity_bbio = btrfs_bio_alloc(map_pages, opf, fs_info,
+				      parity_bbio_endio, NULL);
+
+	bio_for_each_segment_all(bvec, bio, iter_all) {
+		page = bvec->bv_page;
+
+		(void)page;
+
+		// add page to pages array
+		npages++;
+	}
+	printk("%s: npages=%u\n", __func__, npages);
+
+	// run_xor(pages, npages, map_pages)
+	// XXX: For now
+	bio_put(&parity_bbio->bio);
+
+	return 0;
+}
+
 static bool btrfs_submit_chunk(struct btrfs_bio *bbio, int mirror_num)
 {
 	struct btrfs_inode *inode = bbio->inode;
@@ -683,6 +740,14 @@ static bool btrfs_submit_chunk(struct btrfs_bio *bbio, int mirror_num)
 	map_length = min(map_length, length);
 	if (use_append)
 		map_length = min(map_length, fs_info->max_zone_append_size);
+
+	if (fs_info->stripe_root && btrfs_op(bio) == BTRFS_MAP_WRITE &&
+	    is_data_bbio(bbio) && bioc &&
+	    bioc->map_type & BTRFS_BLOCK_GROUP_RAID56_MASK) {
+		ret = btrfs_generate_parity_bbio(bbio, bioc, map_length);
+		if (ret)
+			goto fail;
+	}
 
 	if (map_length < length) {
 		bbio = btrfs_split_bio(fs_info, bbio, map_length, use_append);
