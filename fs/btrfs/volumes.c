@@ -6589,7 +6589,9 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
 		break;
 	case BTRFS_BLOCK_GROUP_RAID5:
 	case BTRFS_BLOCK_GROUP_RAID6:
-		if (op != BTRFS_MAP_READ || io_geom.mirror_num > 1)
+		if (btrfs_need_stripe_tree_update(fs_info, map->type))
+			map_blocks_raid0(map, &io_geom);
+		else if (op != BTRFS_MAP_READ || io_geom.mirror_num > 1)
 			map_blocks_raid56_write(map, &io_geom, logical, length);
 		else
 			map_blocks_raid56_read(map, &io_geom);
