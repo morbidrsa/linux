@@ -4037,6 +4037,13 @@ int btrfs_relocate_block_group(struct btrfs_fs_info *fs_info, u64 group_start)
 	int rw = 0;
 	int err = 0;
 
+	spin_lock(&fs_info->relocation_bg_lock);
+	if (group_start == fs_info->data_reloc_bg) {
+		spin_unlock(&fs_info->relocation_bg_lock);
+		return -EBUSY;
+	}
+	spin_unlock(&fs_info->relocation_bg_lock);
+
 	/*
 	 * This only gets set if we had a half-deleted snapshot on mount.  We
 	 * cannot allow relocation to start while we're still trying to clean up

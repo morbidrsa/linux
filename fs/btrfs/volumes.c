@@ -3367,6 +3367,8 @@ int btrfs_relocate_chunk(struct btrfs_fs_info *fs_info, u64 chunk_offset)
 	btrfs_scrub_pause(fs_info);
 	ret = btrfs_relocate_block_group(fs_info, chunk_offset);
 	btrfs_scrub_continue(fs_info);
+	if (ret == -EBUSY)
+		return 0;
 	if (ret) {
 		/*
 		 * If we had a transaction abort, stop all running scrubs.
