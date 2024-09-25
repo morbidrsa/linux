@@ -1485,6 +1485,7 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
 	if (!mutex_trylock(&fs_info->reclaim_bgs_lock))
 		return;
 
+	set_bit(BTRFS_FS_GC_RUNNING, &fs_info->flags);
 	spin_lock(&fs_info->unused_bgs_lock);
 	while (!list_empty(&fs_info->unused_bgs)) {
 		u64 used;
@@ -1712,6 +1713,7 @@ next:
 	list_splice_tail(&retry_list, &fs_info->unused_bgs);
 	spin_unlock(&fs_info->unused_bgs_lock);
 	mutex_unlock(&fs_info->reclaim_bgs_lock);
+	clear_bit(BTRFS_FS_GC_RUNNING, &fs_info->flags);
 	return;
 
 flip_async:
@@ -1720,6 +1722,7 @@ flip_async:
 	list_splice_tail(&retry_list, &fs_info->unused_bgs);
 	spin_unlock(&fs_info->unused_bgs_lock);
 	mutex_unlock(&fs_info->reclaim_bgs_lock);
+	clear_bit(BTRFS_FS_GC_RUNNING, &fs_info->flags);
 	btrfs_put_block_group(block_group);
 	btrfs_discard_punt_unused_bgs_list(fs_info);
 }

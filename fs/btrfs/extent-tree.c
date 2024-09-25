@@ -4069,6 +4069,8 @@ static int can_allocate_chunk_zoned(struct btrfs_fs_info *fs_info,
 	if (btrfs_can_activate_zone(fs_info->fs_devices, ffe_ctl->flags))
 		return 0;
 
+	if (!list_empty(&fs_info->unused_bgs))
+		btrfs_delete_unused_bgs(fs_info);
 	/*
 	 * We already reached the max active zones. Try to finish one block
 	 * group to make a room for a new block group. This is only possible
@@ -4697,6 +4699,8 @@ again:
 		btrfs_dec_block_group_reservations(fs_info, ins->objectid);
 	} else if (ret == -ENOSPC) {
 		if (!final_tried && ins->offset) {
+			wait_on_bit_io(&fs_info->flags, BTRFS_FS_GC_RUNNING,
+				       TASK_INTERRUPTIBLE);
 			num_bytes = min(num_bytes >> 1, ins->offset);
 			num_bytes = round_down(num_bytes,
 					       fs_info->sectorsize);

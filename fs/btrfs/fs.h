@@ -182,6 +182,8 @@ enum {
 	 */
 	BTRFS_FS_UNALIGNED_TREE_BLOCK,
 
+	BTRFS_FS_GC_RUNNING,
+
 #if BITS_PER_LONG == 32
 	/* Indicate if we have error/warn message printed on 32bit systems */
 	BTRFS_FS_32BIT_ERROR,
