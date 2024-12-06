@@ -364,6 +364,25 @@ static void btrfs_simple_end_io(struct bio *bio)
 	}
 }
 
+static void raid56_write_endio(struct bio *bio)
+{
+	struct btrfs_bio *bbio = btrfs_bio(bio);
+	struct btrfs_io_stripe *stripe = bio->bi_private;
+	struct btrfs_fs_info *fs_info = bbio->fs_info;
+
+	btrfs_bio_counter_dec(fs_info);
+
+	if (bio->bi_status)
+		btrfs_log_dev_io_error(bio, stripe->dev);
+
+	if (bio_is_zone_append(bio) && !bio->bi_status)
+		btrfs_record_physical_zoned(bbio);
+
+	btrfs_bio_end_io(bbio, bbio->bio.bi_status);
+
+	btrfs_put_bioc(stripe->bioc);
+}
+
 static void btrfs_raid56_end_io(struct bio *bio)
 {
 	struct btrfs_io_context *bioc = bio->bi_private;
@@ -490,6 +509,27 @@ static void btrfs_submit_mirrored_bio(struct btrfs_io_context *bioc, int dev_nr)
 	btrfs_submit_dev_bio(bioc->stripes[dev_nr].dev, bio);
 }
 
+static void btrfs_submit_raid56_write(struct bio *bio, struct btrfs_io_context *bioc)
+{
+	struct btrfs_bio *bbio = btrfs_bio(bio);
+	struct btrfs_io_stripe *smap;
+	u64 length = bio->bi_iter.bi_size;
+	u64 offset_in_stripe = bioc->logical - bioc->full_stripe_logical;
+	int stripe_nr = offset_in_stripe / BTRFS_STRIPE_LEN;
+
+	bioc->size = length;
+	smap = &bioc->stripes[stripe_nr];
+	smap->bioc = bioc;
+
+	bio = &bbio->bio;
+	bio->bi_iter.bi_sector = smap->physical >> SECTOR_SHIFT;
+	bio->bi_private = smap;
+	bio->bi_end_io = raid56_write_endio;
+	btrfs_submit_dev_bio(smap->dev, bio);
+	refcount_inc(&bbio->ordered->refs);
+	btrfs_get_bioc(bioc);
+}
+
 static void btrfs_submit_bio(struct bio *bio, struct btrfs_io_context *bioc,
 			     struct btrfs_io_stripe *smap, int mirror_num)
 {
@@ -511,6 +551,11 @@ static void btrfs_submit_bio(struct bio *bio, struct btrfs_io_context *bioc,
 			raid56_parity_recover(bio, bioc, mirror_num);
 		else
 			raid56_parity_write(bio, bioc);
+	} else if (bioc->map_type & BTRFS_BLOCK_GROUP_RAID56_MASK && bioc->use_rst) {
+		if (bio_op(bio) == REQ_OP_READ)
+			ASSERT(0);
+		else
+			btrfs_submit_raid56_write(bio, bioc);
 	} else {
 		/* Write to multiple mirrors. */
 		int total_devs = bioc->num_stripes;
@@ -698,6 +743,18 @@ static bool btrfs_submit_chunk(struct btrfs_bio *bbio, int mirror_num)
 		ret = errno_to_blk_status(error);
 		btrfs_bio_counter_dec(fs_info);
 		goto end_bbio;
+	}
+
+	if (bioc && bioc->use_rst &&
+	    bioc->map_type & BTRFS_BLOCK_GROUP_RAID56_MASK) {
+		if (btrfs_op(bio) == BTRFS_MAP_WRITE)
+			ret = btrfs_rst_raid56_write(bbio, bioc);
+		else
+			ret = 0; // Until we have read
+		if (ret) {
+			btrfs_bio_counter_dec(fs_info);
+			goto end_bbio;
+		}
 	}
 
 	map_length = min(map_length, length);
