@@ -379,6 +379,7 @@ void btrfs_print_leaf(const struct extent_buffer *l)
 					btrfs_item_size(l, i));
 			break;
 		case BTRFS_RAID_STRIPE_KEY:
+		case BTRFS_RAID_STRIPE_PARITY_KEY:
 			print_raid_stripe_key(l, btrfs_item_size(l, i),
 				btrfs_item_ptr(l, i, struct btrfs_stripe_extent));
 			break;

@@ -281,6 +281,7 @@
 #define BTRFS_CHUNK_ITEM_KEY	228
 
 #define BTRFS_RAID_STRIPE_KEY	230
+#define BTRFS_RAID_STRIPE_PARITY_KEY	231
 
 /*
  * Records the overall state of the qgroups.
