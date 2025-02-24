@@ -514,6 +514,19 @@ static void btrfs_submit_raid56_write(struct bio *bio, struct btrfs_io_context *
 	btrfs_submit_dev_bio(smap->dev, bio);
 }
 
+static void btrfs_submit_raid56_read_repair(struct bio *bio,
+				     struct btrfs_io_context *bioc,
+				     int mirror_num)
+{
+	struct btrfs_io_stripe *smap = &bioc->stripes[0];
+
+	btrfs_bio(bio)->mirror_num = mirror_num;
+	bio->bi_private = smap->dev;
+	bio->bi_end_io = btrfs_simple_end_io;
+	bio->bi_iter.bi_sector = smap->physical >> SECTOR_SHIFT;
+	btrfs_submit_dev_bio(smap->dev, bio);
+}
+
 static bool btrfs_is_rst_raid56_bioc(struct btrfs_io_context *bioc)
 {
 	if (!bioc)
@@ -551,7 +564,7 @@ static void btrfs_submit_bio(struct bio *bio, struct btrfs_io_context *bioc,
 			raid56_parity_write(bio, bioc);
 	} else if (btrfs_is_rst_raid56_bioc(bioc)) {
 		if (bio_op(bio) == REQ_OP_READ)
-			ASSERT(0);
+			btrfs_submit_raid56_read_repair(bio, bioc, mirror_num);
 		else
 			btrfs_submit_raid56_write(bio, bioc);
 	} else {
