@@ -18,7 +18,7 @@ struct blk_trace {
 	struct rchan *rchan;
 	unsigned long __percpu *sequence;
 	unsigned char __percpu *msg_data;
-	u16 act_mask;
+	u64 act_mask;
 	u64 start_lba;
 	u64 end_lba;
 	u32 pid;
@@ -99,7 +99,7 @@ static inline int blk_trace_remove(struct request_queue *q)
 
 struct compat_blk_user_trace_setup {
 	char name[BLKTRACE_BDEV_SIZE];
-	u16 act_mask;
+	u32 act_mask;
 	u32 buf_size;
 	u32 buf_nr;
 	compat_u64 start_lba;

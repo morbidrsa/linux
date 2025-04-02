@@ -29,8 +29,8 @@ enum blktrace_cat {
 	BLK_TC_END	= 1 << 15,	/* we've run out of bits! */
 };
 
-#define BLK_TC_SHIFT		(16)
-#define BLK_TC_ACT(act)		((act) << BLK_TC_SHIFT)
+#define BLK_TC_SHIFT		(32)
+#define BLK_TC_ACT(act)		((__force u64)(act) << BLK_TC_SHIFT)
 
 /*
  * Basic trace actions
@@ -93,7 +93,7 @@ enum blktrace_notify {
 #define BLK_TN_MESSAGE		(__BLK_TN_MESSAGE | BLK_TC_ACT(BLK_TC_NOTIFY))
 
 #define BLK_IO_TRACE_MAGIC	0x65617400
-#define BLK_IO_TRACE_VERSION	0x07
+#define BLK_IO_TRACE_VERSION	0x08
 
 /*
  * The trace itself
@@ -104,8 +104,8 @@ struct blk_io_trace {
 	__u64 time;		/* in nanoseconds */
 	__u64 sector;		/* disk offset */
 	__u32 bytes;		/* transfer length */
-	__u32 action;		/* what happened */
 	__u32 pid;		/* who did it */
+	__u64 action;		/* what happened */
 	__u32 device;		/* device number */
 	__u32 cpu;		/* on what cpu did it happen */
 	__u16 error;		/* completion error */
@@ -135,7 +135,7 @@ enum {
  */
 struct blk_user_trace_setup {
 	char name[BLKTRACE_BDEV_SIZE];	/* output */
-	__u16 act_mask;			/* input */
+	__u32 act_mask;			/* input */
 	__u32 buf_size;			/* input */
 	__u32 buf_nr;			/* input */
 	__u64 start_lba;

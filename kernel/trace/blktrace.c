@@ -66,7 +66,7 @@ static void blk_unregister_tracepoints(void);
 /*
  * Send out a notify message.
  */
-static void trace_note(struct blk_trace *bt, pid_t pid, int action,
+static void trace_note(struct blk_trace *bt, pid_t pid, u64 action,
 		       const void *data, size_t len, u64 cgid)
 {
 	struct blk_io_trace *t;
@@ -182,7 +182,7 @@ void __blk_trace_note_message(struct blk_trace *bt,
 }
 EXPORT_SYMBOL_GPL(__blk_trace_note_message);
 
-static int act_log_check(struct blk_trace *bt, u32 what, sector_t sector,
+static int act_log_check(struct blk_trace *bt, u64 what, sector_t sector,
 			 pid_t pid)
 {
 	if (((bt->act_mask << BLK_TC_SHIFT) & what) == 0)
@@ -198,14 +198,14 @@ static int act_log_check(struct blk_trace *bt, u32 what, sector_t sector,
 /*
  * Data direction bit lookup
  */
-static const u32 ddir_act[2] = { BLK_TC_ACT(BLK_TC_READ),
+static const u64 ddir_act[2] = { BLK_TC_ACT(BLK_TC_READ),
 				 BLK_TC_ACT(BLK_TC_WRITE) };
 
 #define BLK_TC_RAHEAD		BLK_TC_AHEAD
 #define BLK_TC_PREFLUSH		BLK_TC_FLUSH
 
 /* The ilog2() calls fall out because they're constant */
-#define MASK_TC_BIT(rw, __name) ((__force u32)(rw & REQ_ ## __name) <<	\
+#define MASK_TC_BIT(rw, __name) ((__force u64)(rw & REQ_ ## __name) <<	\
 	  (ilog2(BLK_TC_ ## __name) + BLK_TC_SHIFT - __REQ_ ## __name))
 
 /*
@@ -213,7 +213,7 @@ static const u32 ddir_act[2] = { BLK_TC_ACT(BLK_TC_READ),
  * blk_io_trace structure and places it in a per-cpu subbuffer.
  */
 static void __blk_add_trace(struct blk_trace *bt, sector_t sector, int bytes,
-			    const blk_opf_t opf, u32 what, int error,
+			    const blk_opf_t opf, u64 what, int error,
 			    int pdu_len, void *pdu_data, u64 cgid)
 {
 	struct task_struct *tsk = current;
@@ -812,7 +812,7 @@ blk_trace_request_get_cgid(struct request *rq)
  *
  **/
 static void blk_add_trace_rq(struct request *rq, blk_status_t error,
-			     unsigned int nr_bytes, u32 what, u64 cgid)
+			     unsigned int nr_bytes, u64 what, u64 cgid)
 {
 	struct blk_trace *bt;
 
@@ -876,7 +876,7 @@ static void blk_add_trace_rq_complete(void *ignore, struct request *rq,
  *
  **/
 static void blk_add_trace_bio(struct request_queue *q, struct bio *bio,
-			      u32 what, int error)
+			      u64 what, int error)
 {
 	struct blk_trace *bt;
 
@@ -942,7 +942,7 @@ static void blk_add_trace_unplug(void *ignore, struct request_queue *q,
 	bt = rcu_dereference(q->blk_trace);
 	if (bt) {
 		__be64 rpdu = cpu_to_be64(depth);
-		u32 what;
+		u64 what;
 
 		if (explicit)
 			what = BLK_TA_UNPLUG_IO;
@@ -1134,7 +1134,7 @@ static void blk_unregister_tracepoints(void)
 static void fill_rwbs(char *rwbs, const struct blk_io_trace *t)
 {
 	int i = 0;
-	int tc = t->action >> BLK_TC_SHIFT;
+	u64 tc = t->action >> BLK_TC_SHIFT;
 
 	if ((t->action & ~__BLK_TN_CGROUP) == BLK_TN_MESSAGE) {
 		rwbs[i++] = 'N';
@@ -1186,7 +1186,7 @@ static inline int pdu_real_len(const struct trace_entry *ent, bool has_cg)
 	return te_blk_io_trace(ent)->pdu_len - (has_cg ? sizeof(u64) : 0);
 }
 
-static inline u32 t_action(const struct trace_entry *ent)
+static inline u64 t_action(const struct trace_entry *ent)
 {
 	return te_blk_io_trace(ent)->action;
 }
@@ -1463,13 +1463,14 @@ static enum print_line_t print_one_line(struct trace_iterator *iter,
 	struct trace_array *tr = iter->tr;
 	struct trace_seq *s = &iter->seq;
 	const struct blk_io_trace *t;
-	u16 what;
+	u32 what;
 	bool long_act;
 	blk_log_action_t *log_action;
 	bool has_cg;
 
 	t	   = te_blk_io_trace(iter->ent);
-	what	   = (t->action & ((1 << BLK_TC_SHIFT) - 1)) & ~__BLK_TA_CGROUP;
+	what	   = (t->action & ((1ull << BLK_TC_SHIFT) - 1)) &
+			~__BLK_TA_CGROUP;
 	long_act   = !!(tr->trace_flags & TRACE_ITER_VERBOSE);
 	log_action = classic ? &blk_log_action_classic : &blk_log_action;
 	has_cg	   = t->action & __BLK_TA_CGROUP;
@@ -1617,7 +1618,7 @@ static int blk_trace_setup_queue(struct request_queue *q,
 		goto free_bt;
 
 	bt->dev = bdev->bd_dev;
-	bt->act_mask = (u16)-1;
+	bt->act_mask = (u32)-1;
 
 	blk_trace_setup_lba(bt, bdev);
 
