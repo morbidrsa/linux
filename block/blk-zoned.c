@@ -18,6 +18,7 @@
 #include <linux/mempool.h>
 
 #include <trace/events/block.h>
+#include <linux/blktrace_api.h>
 
 #include "blk.h"
 #include "blk-mq-sched.h"
@@ -822,6 +823,9 @@ static inline void disk_zone_wplug_add_bio(struct gendisk *disk,
 	 * at the tail of the list to preserve the sequential write order.
 	 */
 	bio_list_add(&zwplug->bio_list, bio);
+	blk_add_trace_msg(zwplug->disk->queue, "zone %u, plug BIO %llu + %u",
+			  zwplug->zone_no, bio->bi_iter.bi_sector, nr_segs);
+
 
 	zwplug->flags |= BLK_ZONE_WPLUG_PLUGGED;
 
@@ -1315,6 +1319,11 @@ again:
 		spin_unlock_irqrestore(&zwplug->lock, flags);
 		goto put_zwplug;
 	}
+
+	blk_add_trace_msg(zwplug->disk->queue, "zone %u, unplug BIO %llu + %u",
+			  zwplug->zone_no, bio->bi_iter.bi_sector,
+			  bio->__bi_nr_segments);
+
 
 	if (!blk_zone_wplug_prepare_bio(zwplug, bio)) {
 		blk_zone_wplug_bio_io_error(zwplug, bio);
