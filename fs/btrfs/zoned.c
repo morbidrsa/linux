@@ -2869,3 +2869,55 @@ int btrfs_reset_unused_block_groups(struct btrfs_space_info *space_info, u64 num
 
 	return 0;
 }
+
+int btrfs_zoned_get_allocation_hint(struct btrfs_fs_info *fs_info, u64 *hint)
+{
+	struct btrfs_space_info *space_info = fs_info->data_sinfo;
+	struct btrfs_root *root;
+	struct btrfs_trans_handle *trans;
+	struct btrfs_block_group *bg;
+	int ret;
+
+	// check if there are already N block groups to be used
+	// if yes pick one of them and return the block group's end
+
+	// if not allocate a new data block group, add it's start to the list of
+	// concurrent data block groups and return it.
+
+	if (btrfs_fs_compat_ro(fs_info, BLOCK_GROUP_TREE))
+		root = fs_info->block_group_root;
+	else
+		root = btrfs_extent_root(fs_info, 0);
+
+	trans = btrfs_join_transaction(root);
+	if (IS_ERR(trans))
+		return PTR_ERR(trans);
+
+	mutex_lock(&fs_info->chunk_mutex);
+	bg = btrfs_create_chunk(trans, space_info,
+			   btrfs_get_alloc_profile(fs_info, space_info->flags));
+	if (IS_ERR(bg)) {
+		mutex_unlock(&fs_info->chunk_mutex);
+		ret = PTR_ERR(bg);
+		btrfs_abort_transaction(trans, ret);
+		btrfs_end_transaction(trans);
+		return ret;
+	}
+
+	ret = btrfs_chunk_alloc_add_chunk_item(trans, bg);
+	if (ret) {
+		mutex_unlock(&fs_info->chunk_mutex);
+		btrfs_abort_transaction(trans, ret);
+		btrfs_end_transaction(trans);
+		return ret;
+	}
+	mutex_unlock(&fs_info->chunk_mutex);
+
+	btrfs_get_block_group(bg);
+	*hint = bg->start;
+	btrfs_put_block_group(bg);
+
+	btrfs_end_transaction(trans);
+
+	return 0;
+}

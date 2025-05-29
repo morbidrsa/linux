@@ -1226,6 +1226,17 @@ u64 btrfs_get_extent_allocation_hint(struct btrfs_inode *inode, u64 start,
 			alloc_hint = btrfs_extent_map_block_start(em);
 			btrfs_free_extent_map(em);
 		}
+	} else if (btrfs_is_zoned(inode->root->fs_info) &&
+		   !btrfs_is_data_reloc_root(inode->root)) {
+		/*
+		 * If the filesystem is on a zoned block device and there is no
+		 * extent mapping isn't there, check if there is the opportunity
+		 * to create a new data block-group and set its start as the
+		 * allocation hint.
+		 */
+
+		btrfs_zoned_get_allocation_hint(inode->root->fs_info,
+						&alloc_hint);
 	}
 	read_unlock(&em_tree->lock);
 
