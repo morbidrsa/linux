@@ -889,6 +889,10 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 		break;
 	case RESET_ZONES:
 		ret = btrfs_reset_unused_block_groups(space_info, num_bytes);
+		if (ret)
+			break;
+		btrfs_reclaim_bgs(fs_info);
+		flush_work(&fs_info->reclaim_bgs_work);
 		break;
 	default:
 		ret = -ENOSPC;
