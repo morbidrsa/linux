@@ -361,17 +361,24 @@ void btrfs_add_bg_to_space_info(struct btrfs_fs_info *info,
 {
 	struct btrfs_space_info *space_info = block_group->space_info;
 	int factor, index;
+	u64 length;
 
 	factor = btrfs_bg_type_to_factor(block_group->flags);
 
 	spin_lock(&space_info->lock);
-	space_info->total_bytes += block_group->length;
-	space_info->disk_total += block_group->length * factor;
+
+	if (btrfs_is_zoned(block_group->fs_info))
+		length = block_group->zone_capacity;
+	else
+		length = block_group->length;
+
+	space_info->total_bytes += length;
+	space_info->disk_total += length * factor;
 	space_info->bytes_used += block_group->used;
 	space_info->disk_used += block_group->used * factor;
 	space_info->bytes_readonly += block_group->bytes_super;
 	btrfs_space_info_update_bytes_zone_unusable(space_info, block_group->zone_unusable);
-	if (block_group->length > 0)
+	if (length > 0)
 		space_info->full = 0;
 	btrfs_try_granting_tickets(info, space_info);
 	spin_unlock(&space_info->lock);
