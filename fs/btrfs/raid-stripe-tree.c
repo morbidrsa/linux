@@ -505,7 +505,7 @@ free_path:
 	return ret;
 }
 
-struct btrfs_parity_block {
+struct btrfs_strip_set {
 	struct btrfs_fs_info *fs_info;
 	struct work_struct work;
 	struct list_head list;
@@ -519,34 +519,34 @@ struct btrfs_parity_block {
 	struct btrfs_io_stripe *pstripes;
 };
 
-static void put_btrfs_parity_block(struct btrfs_fs_info *fs_info,
-				   struct btrfs_parity_block *bpb)
+static void put_btrfs_strip_set(struct btrfs_fs_info *fs_info,
+				   struct btrfs_strip_set *set)
 {
-	if (refcount_dec_and_test(&bpb->refs)) {
-		ASSERT(atomic_read(&bpb->pending_ios) == 0);
+	if (refcount_dec_and_test(&set->refs)) {
+		ASSERT(atomic_read(&set->pending_ios) == 0);
 		spin_lock(&fs_info->parity_block_list_lock);
-		list_del(&bpb->list);
+		list_del(&set->list);
 		spin_unlock(&fs_info->parity_block_list_lock);
 
-		kfree(bpb);
+		kfree(set);
 	}
 }
 
-static struct btrfs_parity_block *find_btrfs_parity_block(
+static struct btrfs_strip_set *find_btrfs_strip_set(
 					struct btrfs_io_context *bioc,
 					u64 length)
 {
 	struct btrfs_fs_info *fs_info = bioc->fs_info;
-	struct btrfs_parity_block *bpb;
+	struct btrfs_strip_set *set;
 	bool found = false;
 
 	spin_lock(&fs_info->parity_block_list_lock);
-	list_for_each_entry(bpb, &fs_info->parity_blocks, list) {
-		if (in_range(bioc->logical, bpb->full_stripe_logical,
-			     bpb->full_stripe_len)) {
+	list_for_each_entry(set, &fs_info->parity_blocks, list) {
+		if (in_range(bioc->logical, set->full_stripe_logical,
+			     set->full_stripe_len)) {
 			found = true;
-			bpb->len += length;
-			ASSERT(bpb->len <= bpb->full_stripe_len);
+			set->len += length;
+			ASSERT(set->len <= set->full_stripe_len);
 			break;
 		}
 
@@ -556,20 +556,20 @@ static struct btrfs_parity_block *find_btrfs_parity_block(
 	if (!found)
 		return NULL;
 
-	refcount_inc(&bpb->refs);
-	return bpb;
+	refcount_inc(&set->refs);
+	return set;
 }
 
 static void insert_parity_stripe_work(struct work_struct *work)
 {
-	struct btrfs_parity_block *bpb =
-		container_of(work, struct btrfs_parity_block, work);
-	struct btrfs_fs_info *fs_info = bpb->fs_info;
+	struct btrfs_strip_set *set =
+		container_of(work, struct btrfs_strip_set, work);
+	struct btrfs_fs_info *fs_info = set->fs_info;
 	struct btrfs_trans_handle *trans;
 	struct btrfs_key stripe_key;
 	struct btrfs_root *stripe_root = fs_info->stripe_root;
 	struct btrfs_stripe_extent *stripe_extent;
-	const size_t item_size = struct_size(stripe_extent, strides, bpb->npar);
+	const size_t item_size = struct_size(stripe_extent, strides, set->npar);
 	int ret;
 
 	trans = btrfs_join_transaction(stripe_root);
@@ -583,20 +583,20 @@ static void insert_parity_stripe_work(struct work_struct *work)
 		return;
 	}
 
-	trace_btrfs_insert_parity_stripe(fs_info, bpb->logical, bpb->len, bpb->npar);
+	trace_btrfs_insert_parity_stripe(fs_info, set->logical, set->len, set->npar);
 
-	for (int i = 0; i < bpb->npar; i++) {
-		u64 devid = bpb->pstripes[i].dev->devid;
-		u64 physical = bpb->pstripes[i].physical;
+	for (int i = 0; i < set->npar; i++) {
+		u64 devid = set->pstripes[i].dev->devid;
+		u64 physical = set->pstripes[i].physical;
 		struct btrfs_raid_stride *raid_stride = &stripe_extent->strides[i];
 
 		btrfs_set_stack_raid_stride_devid(raid_stride, devid);
 		btrfs_set_stack_raid_stride_physical(raid_stride, physical);
 	}
 
-	stripe_key.objectid = bpb->logical;
+	stripe_key.objectid = set->logical;
 	stripe_key.type = BTRFS_RAID_STRIPE_PARITY_KEY;
-	stripe_key.offset = bpb->len;
+	stripe_key.offset = set->len;
 
 	ret = btrfs_insert_item(trans, stripe_root, &stripe_key, stripe_extent,
 				item_size);
@@ -608,18 +608,18 @@ static void insert_parity_stripe_work(struct work_struct *work)
 
 	btrfs_end_transaction(trans);
 	kfree(stripe_extent);
-	put_btrfs_parity_block(fs_info, bpb);
+	put_btrfs_strip_set(fs_info, set);
 }
 
 static void raid56_write_endio(struct btrfs_bio *bbio)
 {
-	struct btrfs_parity_block *bpb = bbio->private;
+	struct btrfs_strip_set *set = bbio->private;
 	struct btrfs_fs_info *fs_info = bbio->fs_info;
 
-	if (atomic_dec_and_test(&bpb->pending_ios))
-		queue_work(fs_info->endio_workers, &bpb->work);
+	if (atomic_dec_and_test(&set->pending_ios))
+		queue_work(fs_info->endio_workers, &set->work);
 
-	put_btrfs_parity_block(fs_info, bpb);
+	put_btrfs_strip_set(fs_info, set);
 }
 
 static void btrfs_simple_end_io(struct bio *bio)
@@ -629,35 +629,35 @@ static void btrfs_simple_end_io(struct bio *bio)
 	btrfs_bio_end_io(bbio, bbio->bio.bi_status);
 }
 
-static struct btrfs_parity_block *alloc_btrfs_parity_block(struct btrfs_io_context *bioc,
+static struct btrfs_strip_set *alloc_btrfs_strip_set(struct btrfs_io_context *bioc,
 							   u64 len)
 {
 	struct btrfs_fs_info *fs_info = bioc->fs_info;
 	const unsigned int nr_parity = btrfs_nr_parity_stripes(bioc->map_type);
 	const unsigned int nr_data = bioc->num_stripes - nr_parity;
-	struct btrfs_parity_block *bpb;
+	struct btrfs_strip_set *set;
 
-	bpb = kzalloc(sizeof(struct btrfs_parity_block), GFP_NOFS);
-	if (!bpb)
+	set = kzalloc(sizeof(struct btrfs_strip_set), GFP_NOFS);
+	if (!set)
 		return ERR_PTR(-ENOMEM);
 
-	refcount_set(&bpb->refs, 1);
-	atomic_set(&bpb->pending_ios, 0);
-	INIT_LIST_HEAD(&bpb->list);
-	INIT_WORK(&bpb->work, insert_parity_stripe_work);
-	bpb->fs_info = fs_info;
-	bpb->full_stripe_logical = bioc->full_stripe_logical;
-	bpb->full_stripe_len = nr_data * BTRFS_STRIPE_LEN;
-	bpb->logical = bioc->logical;
-	bpb->len = len;
-	bpb->npar = nr_parity;
-	bpb->pstripes = bioc->stripes + nr_data;
+	refcount_set(&set->refs, 1);
+	atomic_set(&set->pending_ios, 0);
+	INIT_LIST_HEAD(&set->list);
+	INIT_WORK(&set->work, insert_parity_stripe_work);
+	set->fs_info = fs_info;
+	set->full_stripe_logical = bioc->full_stripe_logical;
+	set->full_stripe_len = nr_data * BTRFS_STRIPE_LEN;
+	set->logical = bioc->logical;
+	set->len = len;
+	set->npar = nr_parity;
+	set->pstripes = bioc->stripes + nr_data;
 
 	spin_lock(&fs_info->parity_block_list_lock);
-	list_add_tail(&bpb->list, &fs_info->parity_blocks);
+	list_add_tail(&set->list, &fs_info->parity_blocks);
 	spin_unlock(&fs_info->parity_block_list_lock);
 
-	return bpb;
+	return set;
 }
 
 int btrfs_rst_raid56_write(struct btrfs_bio *orig_bbio,
@@ -671,7 +671,7 @@ int btrfs_rst_raid56_write(struct btrfs_bio *orig_bbio,
 	u64 map_pages = length >> PAGE_SHIFT;
 	struct bio_vec bvec;
 	struct bvec_iter iter;
-	struct btrfs_parity_block *bpb;
+	struct btrfs_strip_set *set;
 	int nr_parity = btrfs_nr_parity_stripes(bioc->map_type);
 	u8 *parity;
 	struct folio *folio;
@@ -684,17 +684,17 @@ int btrfs_rst_raid56_write(struct btrfs_bio *orig_bbio,
 	// private structure (and has parity information associated). This will
 	// be recorded in a structure (list or rbtree) in fs_info.
 
-	bpb = find_btrfs_parity_block(bioc, length);
-	if (!bpb) {
-		bpb = alloc_btrfs_parity_block(bioc, length);
-		if (IS_ERR(bpb))
-			return PTR_ERR(bpb);
+	set = find_btrfs_strip_set(bioc, length);
+	if (!set) {
+		set = alloc_btrfs_strip_set(bioc, length);
+		if (IS_ERR(set))
+			return PTR_ERR(set);
 	}
 
 	// XXX: only calculate the parity if the stripe is full
-	// a.k.a bpb->length == bpb->full_stripe_length
-	// otherwise we need to cache the data bvecs in bpb??
-	refcount_inc(&bpb->refs);
+	// a.k.a set->length == set->full_stripe_length
+	// otherwise we need to cache the data bvecs in set??
+	refcount_inc(&set->refs);
 
 	if (btrfs_use_zone_append(orig_bbio))
 		op = REQ_OP_ZONE_APPEND;
@@ -703,7 +703,7 @@ int btrfs_rst_raid56_write(struct btrfs_bio *orig_bbio,
 
 	folio = folio_alloc(GFP_NOFS, get_order(length));
 	if (!folio) {
-		put_btrfs_parity_block(fs_info, bpb);
+		put_btrfs_strip_set(fs_info, set);
 		return -ENOMEM;
 	}
 
@@ -722,12 +722,12 @@ int btrfs_rst_raid56_write(struct btrfs_bio *orig_bbio,
 		i++;
 	}
 
-	bbio = btrfs_bio_alloc(map_pages, op, fs_info, raid56_write_endio, bpb);
+	bbio = btrfs_bio_alloc(map_pages, op, fs_info, raid56_write_endio, set);
 	bio = &bbio->bio;
 	bio_add_folio_nofail(bio, folio, folio_size(folio), 0);
 
 	if (nr_parity == 1) {
-		struct btrfs_io_stripe *pstripe = &bpb->pstripes[0];
+		struct btrfs_io_stripe *pstripe = &set->pstripes[0];
 		u64 physical = pstripe->physical;
 
 		/*
@@ -742,14 +742,14 @@ int btrfs_rst_raid56_write(struct btrfs_bio *orig_bbio,
 		bio->bi_iter.bi_sector = physical >> SECTOR_SHIFT;
 		bio->bi_end_io = btrfs_simple_end_io;
 
-		refcount_inc(&bpb->refs);
-		atomic_inc(&bpb->pending_ios);
+		refcount_inc(&set->refs);
+		atomic_inc(&set->pending_ios);
 		submit_bio(bio);
 	} else {
 		/* TODO multiple parity disks */
 		ASSERT(0);
 	}
 
-	put_btrfs_parity_block(fs_info, bpb);
+	put_btrfs_strip_set(fs_info, set);
 	return 0;
 }
