@@ -566,7 +566,8 @@ static void btrfs_submit_bio(struct bio *bio, struct btrfs_io_context *bioc,
 		if (bio_op(bio) == REQ_OP_READ)
 			btrfs_submit_raid56_read_repair(bio, bioc, mirror_num);
 		else
-			btrfs_submit_raid56_write(bio, bioc);
+			//btrfs_submit_raid56_write(bio, bioc);
+			btrfs_rst_raid56_submit_write_bio(bioc, bio);
 	} else {
 		/* Write to multiple mirrors. */
 		int total_devs = bioc->num_stripes;
@@ -756,6 +757,7 @@ static bool btrfs_submit_chunk(struct btrfs_bio *bbio, int mirror_num)
 		goto end_bbio;
 	}
 
+#if 0
 	if (btrfs_is_rst_raid56_bioc(bioc)) {
 		if (btrfs_op(bio) == BTRFS_MAP_WRITE)
 			ret = btrfs_rst_raid56_write(bbio, bioc);
@@ -767,7 +769,7 @@ static bool btrfs_submit_chunk(struct btrfs_bio *bbio, int mirror_num)
 			goto end_bbio;
 		}
 	}
-
+#endif
 	map_length = min(map_length, length);
 	if (use_append)
 		map_length = btrfs_append_map_length(bbio, map_length);

@@ -30,6 +30,8 @@ int btrfs_get_raid_extent_offset(struct btrfs_fs_info *fs_info,
 				 u32 stripe_index, struct btrfs_io_stripe *stripe);
 int btrfs_insert_raid_extent(struct btrfs_trans_handle *trans,
 			     struct btrfs_ordered_extent *ordered_extent);
+void btrfs_rst_raid56_submit_write_bio(struct btrfs_io_context *bioc,
+				       struct bio *bio);
 int btrfs_rst_raid56_write(struct btrfs_bio *bbio,
 			   struct btrfs_io_context *bioc);
 
