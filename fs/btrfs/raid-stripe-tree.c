@@ -670,7 +670,6 @@ static void btrfs_rst_raid56_write_partial_stripe(
 static void btrfs_rst_raid56_write_full_stripe(struct btrfs_raid_write_ctx *ctx)
 {
 	struct btrfs_fs_info *fs_info = ctx->fs_info;
-	struct bio *bio = ctx->bio;
 	struct btrfs_stripe_set *set;
 	struct btrfs_bio *bbio;
 	struct bio *pbio;
@@ -687,7 +686,7 @@ static void btrfs_rst_raid56_write_full_stripe(struct btrfs_raid_write_ctx *ctx)
 
 	set = btrfs_alloc_stripe_set(ctx->bioc, ctx->total_size);
 
-	if (btrfs_use_zone_append(btrfs_bio(bio)))
+	if (btrfs_use_zone_append(btrfs_bio(ctx->bio)))
 		op = REQ_OP_ZONE_APPEND;
 	else
 		op = REQ_OP_WRITE;
@@ -695,14 +694,14 @@ static void btrfs_rst_raid56_write_full_stripe(struct btrfs_raid_write_ctx *ctx)
 	folio = folio_alloc(GFP_NOFS, get_order(ctx->total_size));
 	if (!folio) {
 		put_btrfs_stripe_set(fs_info, set);
-		bio->bi_status = BLK_STS_RESOURCE;
-		bio_endio(bio);
+		ctx->bio->bi_status = BLK_STS_RESOURCE;
+		bio_endio(ctx->bio);
 		return;
 	}
 
 	parity = folio_address(folio);
 
-	bio_for_each_segment(bvec, bio, iter) {
+	bio_for_each_segment(bvec, ctx->bio, iter) {
 		unsigned int poff = i * sectorsize;
 		u64 end = bvec.bv_len + sectorsize - 1;
 		void *src = bvec_kmap_local(&bvec);
@@ -721,7 +720,7 @@ static void btrfs_rst_raid56_write_full_stripe(struct btrfs_raid_write_ctx *ctx)
 	pstripe = &set->pstripes[0];
 	physical = pstripe->physical;
 
-	bio_set_dev(bio, pstripe->dev->bdev);
+	bio_set_dev(pbio, pstripe->dev->bdev);
 
 	pbio->bi_iter.bi_sector = physical >> SECTOR_SHIFT;
 	pbio->bi_end_io = btrfs_simple_end_io;
@@ -733,7 +732,7 @@ static void btrfs_rst_raid56_write_full_stripe(struct btrfs_raid_write_ctx *ctx)
 	atomic_inc(&set->pending_ios);
 	submit_bio(pbio);
 
-	btrfs_rst_raid56_submit_bbio(btrfs_bio(bio));
+	submit_bio(ctx->bio);
 }
 
 static void btrfs_rst_raid56_submit_write_bios(struct btrfs_io_context *bioc,

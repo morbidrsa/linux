@@ -867,11 +867,15 @@ end_bbio:
 
 void btrfs_submit_bbio(struct btrfs_bio *bbio, int mirror_num)
 {
+	struct blk_plug plug;
+
 	/* If bbio->inode is not populated, its file_offset must be 0. */
 	ASSERT(bbio->inode || bbio->file_offset == 0);
 
+	blk_start_plug(&plug);
 	while (!btrfs_submit_chunk(bbio, mirror_num))
 		;
+	blk_finish_plug(&plug);
 }
 
 /*
