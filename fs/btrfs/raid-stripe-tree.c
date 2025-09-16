@@ -506,10 +506,13 @@ free_path:
 	return ret;
 }
 
+#define BTRFS_RST_RAID_MAX_STRIPE_UNITS 16
+
 struct btrfs_stripe_set {
 	struct btrfs_fs_info *fs_info;
 	struct work_struct work;
 	struct list_head list;
+	struct bio *bios[BTRFS_RST_RAID_MAX_STRIPE_UNITS];
 	u64 full_stripe_logical;
 	u64 full_stripe_len;
 	u64 logical;
@@ -523,8 +526,12 @@ struct btrfs_stripe_set {
 static void put_btrfs_stripe_set(struct btrfs_fs_info *fs_info,
 				 struct btrfs_stripe_set *set)
 {
-	if (refcount_dec_and_test(&set->refs))
+	if (refcount_dec_and_test(&set->refs)) {
+		spin_lock(&fs_info->stripe_set_lock);
+		list_del_init(&set->list);
+		spin_unlock(&fs_info->stripe_set_lock);
 		kfree(set);
+	}
 }
 
 static void insert_parity_stripe_work(struct work_struct *work)
@@ -675,12 +682,24 @@ static u32 btrfs_stripe_bytes(struct btrfs_io_context *bioc)
 	return nr_stripes * BTRFS_STRIPE_LEN;
 }
 
+static void *btrfs_rst_raid56_add_data(struct btrfs_stripe_set *set,
+				       struct bio *orig, int stripe_nr)
+{
+	struct bio_vec bv = mp_bvec_iter_bvec(orig->bi_io_vec, orig->bi_iter);
+
+//	if (!set->bio[stripe_nr]) {
+//		set->bios[stripe_nr] = b
+//	}
+
+	return bvec_virt(&bv);
+}
+
 static void btrfs_rst_raid56_write_partial_stripe(
 					  struct btrfs_raid_write_ctx *ctx,
 					  u32 stripe_offset)
 {
-	struct btrfs_stripe_set *set;
 	u32 len = ctx->bio->bi_iter.bi_size;
+	struct btrfs_stripe_set *set;
 
 	printk(KERN_ERR "%s: called, stripe_offset=%u\n", __func__, stripe_offset);
 
@@ -688,15 +707,13 @@ static void btrfs_rst_raid56_write_partial_stripe(
 	if (!set)
 		set = btrfs_alloc_stripe_set(ctx->bioc, len);
 
-#if 0
 	/* stripe set is full, calculate parity */
 	if (set->len == ctx->total_size) {
-		calculate_parity(set);
+	//	calculate_parity(set);
 	} else {
-		bio = bio_clone(ctx->bio);
-		bio_list_add_head_or_tail(set->bios, bio);
+		btrfs_rst_raid56_add_data(set, ctx->bio,
+					  btrfs_bioc_to_stripe_nr(ctx->bioc));
 	}
-#endif
 	btrfs_submit_raid56_write(ctx->bio, ctx->bioc);
 }
 

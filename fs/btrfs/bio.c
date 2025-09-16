@@ -651,7 +651,8 @@ static void run_one_async_done(struct btrfs_work *work, bool do_free)
 	btrfs_submit_bio(bio, async->bioc, &async->smap, async->mirror_num);
 }
 
-static bool should_async_write(struct btrfs_bio *bbio)
+static bool should_async_write(struct btrfs_bio *bbio,
+			       struct btrfs_io_context *bioc)
 {
 	bool auto_csum_mode = true;
 
@@ -678,6 +679,9 @@ static bool should_async_write(struct btrfs_bio *bbio)
 
 	/* Zoned devices require I/O to be submitted in order. */
 	if ((bbio->bio.bi_opf & REQ_META) && btrfs_is_zoned(bbio->fs_info))
+		return false;
+
+	if (btrfs_is_rst_raid56_bioc(bioc))
 		return false;
 
 	return true;
@@ -822,7 +826,7 @@ static bool btrfs_submit_chunk(struct btrfs_bio *bbio, int mirror_num)
 		if (inode && !(inode->flags & BTRFS_INODE_NODATASUM) &&
 		    !test_bit(BTRFS_FS_STATE_NO_DATA_CSUMS, &fs_info->fs_state) &&
 		    !btrfs_is_data_reloc_root(inode->root)) {
-			if (should_async_write(bbio) &&
+			if (should_async_write(bbio, bioc) &&
 			    btrfs_wq_submit_bio(bbio, bioc, &smap, mirror_num))
 				goto done;
 
@@ -871,7 +875,7 @@ void btrfs_submit_bbio(struct btrfs_bio *bbio, int mirror_num)
 	/* If bbio->inode is not populated, its file_offset must be 0. */
 	ASSERT(bbio->inode || bbio->file_offset == 0);
 
-	if (btrfs_op(&bbio->bio) == BTRFS_MAP_WRITE)
+	if (btrfs_op(&bbio->bio) == BTRFS_MAP_WRITE && is_data_bbio(bbio))
 		printk("%s: logical=%llu, len=%u\n", __func__, bbio->bio.bi_iter.bi_sector << SECTOR_SHIFT, bbio->bio.bi_iter.bi_size);
 	blk_start_plug(&plug);
 	while (!btrfs_submit_chunk(bbio, mirror_num))
