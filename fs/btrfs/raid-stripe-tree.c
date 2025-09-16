@@ -5,6 +5,7 @@
 
 #include <linux/btrfs_tree.h>
 #include <linux/raid/xor.h>
+#include <linux/minmax.h>
 #include "ctree.h"
 #include "fs.h"
 #include "accessors.h"
@@ -538,6 +539,7 @@ static void insert_parity_stripe_work(struct work_struct *work)
 	const size_t item_size = struct_size(stripe_extent, strides, set->npar);
 	int ret;
 
+	printk(KERN_ERR "%s: called\n", __func__);
 	trans = btrfs_join_transaction(stripe_root);
 	if (IS_ERR(trans))
 		return;
@@ -596,7 +598,7 @@ static void btrfs_simple_end_io(struct bio *bio)
 }
 
 static struct btrfs_stripe_set *btrfs_alloc_stripe_set(struct btrfs_io_context *bioc,
-							   u64 len)
+						       u64 len)
 {
 	struct btrfs_fs_info *fs_info = bioc->fs_info;
 	const unsigned int nr_parity = btrfs_nr_parity_stripes(bioc->map_type);
@@ -619,6 +621,32 @@ static struct btrfs_stripe_set *btrfs_alloc_stripe_set(struct btrfs_io_context *
 	set->npar = nr_parity;
 	set->pstripes = bioc->stripes + nr_data;
 
+	spin_lock(&fs_info->stripe_set_lock);
+	list_add_tail(&set->list, &fs_info->stripe_sets);
+	spin_unlock(&fs_info->stripe_set_lock);
+	return set;
+}
+
+static struct btrfs_stripe_set *btrfs_find_stripe_set(struct btrfs_io_context *bioc, u64 len)
+{
+	struct btrfs_fs_info *fs_info = bioc->fs_info;
+	struct btrfs_stripe_set *set;
+	bool found = false;
+
+	spin_lock(&fs_info->stripe_set_lock);
+	list_for_each_entry(set, &fs_info->stripe_sets, list) {
+		if (in_range(bioc->logical, set->full_stripe_logical,
+			     set->full_stripe_len)) {
+			found = true;
+			break;
+		}
+	}
+	spin_unlock(&fs_info->stripe_set_lock);
+
+	if (!found)
+		return 0;
+
+	set->len += len;
 	return set;
 }
 
@@ -651,20 +679,25 @@ static void btrfs_rst_raid56_write_partial_stripe(
 					  struct btrfs_raid_write_ctx *ctx,
 					  u32 stripe_offset)
 {
-	struct bio *bio = ctx->bio;
 	struct btrfs_stripe_set *set;
+	u32 len = ctx->bio->bi_iter.bi_size;
 
-	set = btrfs_alloc_stripe_set(ctx->bioc, ctx->total_size);
+	printk(KERN_ERR "%s: called, stripe_offset=%u\n", __func__, stripe_offset);
 
-	/*
-	if (!stripe_offset) {
-		int err;
+	set = btrfs_find_stripe_set(ctx->bioc, len);
+	if (!set)
+		set = btrfs_alloc_stripe_set(ctx->bioc, len);
 
-		err = parity_item_alloc(...);
+#if 0
+	/* stripe set is full, calculate parity */
+	if (set->len == ctx->total_size) {
+		calculate_parity(set);
+	} else {
+		bio = bio_clone(ctx->bio);
+		bio_list_add_head_or_tail(set->bios, bio);
 	}
-	*/
-
-	bio_endio(bio);
+#endif
+	btrfs_submit_raid56_write(ctx->bio, ctx->bioc);
 }
 
 static void btrfs_rst_raid56_write_full_stripe(struct btrfs_raid_write_ctx *ctx)
@@ -683,6 +716,8 @@ static void btrfs_rst_raid56_write_full_stripe(struct btrfs_raid_write_ctx *ctx)
 	u32 sectorsize = fs_info->sectorsize;
 	u8 *parity;
 	int i = 0;
+
+	printk(KERN_ERR "%s: called\n", __func__);
 
 	set = btrfs_alloc_stripe_set(ctx->bioc, ctx->total_size);
 

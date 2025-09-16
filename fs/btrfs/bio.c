@@ -494,7 +494,7 @@ static void btrfs_submit_mirrored_bio(struct btrfs_io_context *bioc, int dev_nr)
 	btrfs_submit_dev_bio(bioc->stripes[dev_nr].dev, bio);
 }
 
-static void btrfs_submit_raid56_write(struct bio *bio, struct btrfs_io_context *bioc)
+void btrfs_submit_raid56_write(struct bio *bio, struct btrfs_io_context *bioc)
 {
 	struct btrfs_bio *bbio = btrfs_bio(bio);
 	struct btrfs_io_stripe *smap;
@@ -566,7 +566,6 @@ static void btrfs_submit_bio(struct bio *bio, struct btrfs_io_context *bioc,
 		if (bio_op(bio) == REQ_OP_READ)
 			btrfs_submit_raid56_read_repair(bio, bioc, mirror_num);
 		else
-			//btrfs_submit_raid56_write(bio, bioc);
 			btrfs_rst_raid56_submit_write_bio(bioc, bio);
 	} else {
 		/* Write to multiple mirrors. */
@@ -872,6 +871,8 @@ void btrfs_submit_bbio(struct btrfs_bio *bbio, int mirror_num)
 	/* If bbio->inode is not populated, its file_offset must be 0. */
 	ASSERT(bbio->inode || bbio->file_offset == 0);
 
+	if (btrfs_op(&bbio->bio) == BTRFS_MAP_WRITE)
+		printk("%s: logical=%llu, len=%u\n", __func__, bbio->bio.bi_iter.bi_sector << SECTOR_SHIFT, bbio->bio.bi_iter.bi_size);
 	blk_start_plug(&plug);
 	while (!btrfs_submit_chunk(bbio, mirror_num))
 		;

@@ -15,6 +15,7 @@
 struct btrfs_bio;
 struct btrfs_fs_info;
 struct btrfs_inode;
+struct btrfs_io_context;
 
 #define BTRFS_BIO_INLINE_CSUM_SIZE	64
 
@@ -110,6 +111,7 @@ void btrfs_bio_end_io(struct btrfs_bio *bbio, blk_status_t status);
 #define REQ_BTRFS_CGROUP_PUNT			REQ_FS_PRIVATE
 
 void btrfs_submit_bbio(struct btrfs_bio *bbio, int mirror_num);
+void btrfs_submit_raid56_write(struct bio *bio, struct btrfs_io_context *bioc);
 void btrfs_submit_repair_write(struct btrfs_bio *bbio, int mirror_num, bool dev_replace);
 int btrfs_repair_io_failure(struct btrfs_fs_info *fs_info, u64 ino, u64 start,
 			    u64 length, u64 logical, phys_addr_t paddr, int mirror_num);

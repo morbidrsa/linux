@@ -908,6 +908,8 @@ struct btrfs_fs_info {
 	spinlock_t eb_leak_lock;
 	struct list_head allocated_ebs;
 #endif
+	spinlock_t stripe_set_lock;
+	struct list_head stripe_sets;
 };
 
 #define folio_to_inode(_folio)	(BTRFS_I(_Generic((_folio),			\
