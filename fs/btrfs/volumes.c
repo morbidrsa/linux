@@ -1576,6 +1576,13 @@ static bool dev_extent_hole_check_zoned(struct btrfs_device *device, u64 type,
 		if (type & BTRFS_BLOCK_GROUP_DATA && !sequential)
 			goto next_zone;
 
+		/*
+		 * TODO: check if we have conventional zones left and if not
+		 * skip this step. Also if device has no conventional zones.
+		 */
+		if (!(type & BTRFS_BLOCK_GROUP_DATA) && sequential)
+			goto next_zone;
+
 		ret = btrfs_ensure_empty_zones(device, pos, num_bytes);
 
 		/* Range is ensured to be empty */
