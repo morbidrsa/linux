@@ -6,7 +6,6 @@
 #include <linux/io.h>
 #include <linux/mcb.h>
 
-#include <linux/pci.h>
 #include "mcb-internal.h"
 
 #define for_each_chameleon_cell(dtype, p)	\
@@ -29,9 +28,9 @@ static int chameleon_parse_bdd(struct mcb_bus *bus,
 	return 0;
 }
 
-static int chameleon_parse_gdd(struct mcb_bus *bus,
-			struct chameleon_bar *cb,
-			void __iomem *base, int bar_count)
+static int chameleon_parse_gdd(struct mcb_bus *bus, struct chameleon_bar *cb,
+			       void __iomem *base, int bar_count,
+			       struct chameleon_parse_ops *cham_ops)
 {
 	struct chameleon_gdd __iomem *gdd =
 		(struct chameleon_gdd __iomem *) base;
@@ -77,7 +76,7 @@ static int chameleon_parse_gdd(struct mcb_bus *bus,
 		goto err;
 	}
 
-	if (dev_mapbase & 0x01) {
+	if (cham_ops->is_bar_iomapped(bus->carrier, cb, mdev->bar)) {
 		pr_info("IO mapped Device (16z%03d) not yet supported\n",
 			mdev->id);
 		ret = 0;
@@ -107,71 +106,8 @@ err:
 	return ret;
 }
 
-static void chameleon_parse_bar(void __iomem *base,
-				struct chameleon_bar *cb, int bar_count)
-{
-	char __iomem *p = base;
-	int i;
-
-	/* skip reg1 */
-	p += sizeof(__le32);
-
-	for (i = 0; i < bar_count; i++) {
-		cb[i].addr = readl(p);
-		cb[i].size = readl(p + 4);
-
-		p += sizeof(struct chameleon_bar);
-	}
-}
-
-static int chameleon_get_bar(void __iomem **base, struct chameleon_bar **cb,
-			     struct device *dev)
-{
-	struct chameleon_bar *c;
-	int bar_count;
-	__le32 reg;
-	u32 dtype;
-
-	/*
-	 * For those devices which are not connected
-	 * to the PCI Bus (e.g. LPC) there is a bar
-	 * descriptor located directly after the
-	 * chameleon header. This header is comparable
-	 * to a PCI header.
-	 */
-	dtype = get_next_dtype(*base);
-	if (dtype == CHAMELEON_DTYPE_BAR) {
-		reg = readl(*base);
-
-		bar_count = BAR_CNT(reg);
-		if (bar_count <= 0 || bar_count > CHAMELEON_BAR_MAX)
-			return -ENODEV;
-
-		c = kzalloc_objs(struct chameleon_bar, bar_count);
-		if (!c)
-			return -ENOMEM;
-
-		chameleon_parse_bar(*base, c, bar_count);
-		*base += BAR_DESC_SIZE(bar_count);
-	} else {
-		struct pci_dev *pdev = to_pci_dev(dev);
-
-		bar_count = PCI_STD_NUM_BARS;
-		c = kzalloc_objs(struct chameleon_bar, bar_count);
-		if (!c)
-			return -ENOMEM;
-		for (int i = 0; i < bar_count; ++i) {
-			c[i].addr = pci_resource_start(pdev, i);
-			c[i].size = pci_resource_len(pdev, i);
-		}
-	}
-
-	*cb = c;
-
-	return bar_count;
-}
-
-int chameleon_parse_cells(struct mcb_bus *bus, void __iomem *base)
+int chameleon_parse_cells(struct mcb_bus *bus, void __iomem *base,
+			  struct chameleon_parse_ops *cham_bus_ops)
 {
 	struct chameleon_fpga_header *header;
 	struct chameleon_bar *cb;
@@ -207,7 +143,7 @@ int chameleon_parse_cells(struct mcb_bus *bus, void __iomem *base)
 	memcpy(bus->name, header->filename, CHAMELEON_FILENAME_LEN);
 	bus->name[CHAMELEON_FILENAME_LEN] = '\0';
 
-	bar_count = chameleon_get_bar(&p, &cb, bus->carrier);
+	bar_count = cham_bus_ops->get_bars(&p, &cb, bus->carrier);
 	if (bar_count < 0) {
 		ret = bar_count;
 		goto free_header;
@@ -216,7 +152,8 @@ int chameleon_parse_cells(struct mcb_bus *bus, void __iomem *base)
 	for_each_chameleon_cell(dtype, p) {
 		switch (dtype) {
 		case CHAMELEON_DTYPE_GENERAL:
-			ret = chameleon_parse_gdd(bus, cb, p, bar_count);
+			ret = chameleon_parse_gdd(bus, cb, p, bar_count,
+						  cham_bus_ops);
 			if (ret < 0)
 				goto free_bar;
 			p += sizeof(struct chameleon_gdd);

@@ -19,6 +19,60 @@ struct priv {
 	void __iomem *base;
 };
 
+static int mcb_lpc_get_bars(void __iomem **base, struct chameleon_bar **cb,
+			    struct device *pdev)
+{
+	struct chameleon_bar *c;
+	int bar_count;
+	__le32 reg;
+	char __iomem *p = *base;
+	int i;
+
+	/*
+	 * For those devices which are not connected
+	 * to the PCI Bus (e.g. LPC) there is a bar
+	 * descriptor located directly after the
+	 * chameleon header. This header is comparable
+	 * to a PCI header.
+	 */
+	reg = readl(*base);
+
+	bar_count = BAR_CNT(reg);
+	if (bar_count <= 0 || bar_count > CHAMELEON_BAR_MAX)
+		return -ENODEV;
+
+	c = kzalloc_objs(struct chameleon_bar, bar_count);
+	if (!c)
+		return -ENOMEM;
+
+	/* skip reg1 */
+	p += sizeof(__le32);
+
+	for (i = 0; i < bar_count; i++) {
+		c[i].addr = readl(p);
+		c[i].size = readl(p + 4);
+
+		p += sizeof(struct chameleon_bar);
+	}
+	*base += BAR_DESC_SIZE(bar_count);
+	*cb = c;
+
+	return bar_count;
+}
+
+static bool mcb_is_lpc_bar_iomapped(struct device *dev,
+				      struct chameleon_bar *cb, int bar)
+{
+	if (cb[bar].addr & 0x01)
+		return true;
+	return false;
+}
+
+static struct chameleon_parse_ops lpc_parse_ops = {
+	.is_bar_iomapped = mcb_is_lpc_bar_iomapped,
+	.get_bars = mcb_lpc_get_bars,
+};
+
 static int mcb_lpc_probe(struct platform_device *pdev)
 {
 	struct resource *res;
@@ -56,7 +110,7 @@ static int mcb_lpc_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->bus))
 		return PTR_ERR(priv->bus);
 
-	ret = chameleon_parse_cells(priv->bus, priv->base);
+	ret = chameleon_parse_cells(priv->bus, priv->base, &lpc_parse_ops);
 	if (ret < 0) {
 		goto out_mcb_bus;
 	}

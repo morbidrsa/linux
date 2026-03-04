@@ -122,6 +122,13 @@ struct chameleon_bar {
 #define CHAMELEON_BAR_MAX	6
 #define BAR_DESC_SIZE(x)	((x) * sizeof(struct chameleon_bar) + sizeof(__le32))
 
-int chameleon_parse_cells(struct mcb_bus *bus, void __iomem *base);
+struct chameleon_parse_ops {
+	bool (*is_bar_iomapped)(struct device *dev, struct chameleon_bar *cb,
+				  int bar);
+	int (*get_bars)(void __iomem **base, struct chameleon_bar **cb,
+			struct device *dev);
+};
 
+int chameleon_parse_cells(struct mcb_bus *bus, void __iomem *base,
+			  struct chameleon_parse_ops *cham_bus_ops);
 #endif

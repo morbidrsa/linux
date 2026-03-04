@@ -18,6 +18,44 @@ struct priv {
 	void __iomem *base;
 };
 
+static int pci_get_bars(void __iomem **base, struct chameleon_bar **cb,
+			struct device *dev)
+{
+	struct pci_dev *pdev;
+	struct chameleon_bar *c;
+	int bar_count;
+
+	pdev = to_pci_dev(dev);
+	bar_count = PCI_STD_NUM_BARS;
+	c = kzalloc_objs(struct chameleon_bar, bar_count);
+	if (!c)
+		return -ENOMEM;
+	for (int i = 0; i < bar_count; ++i) {
+		c[i].addr = pci_resource_start(pdev, i);
+		c[i].size = pci_resource_len(pdev, i);
+	}
+
+	*cb = c;
+
+	return bar_count;
+}
+
+static bool is_pci_bar_iomapped(struct device *dev, struct chameleon_bar *cb,
+				  int bar)
+{
+	struct pci_dev *pdev;
+
+	pdev = to_pci_dev(dev);
+	if (pci_resource_flags(pdev, bar) & IORESOURCE_IO)
+		return true;
+	return false;
+}
+
+static struct chameleon_parse_ops cham_pci_ops = {
+	.is_bar_iomapped = is_pci_bar_iomapped,
+	.get_bars = pci_get_bars,
+};
+
 static int mcb_pci_get_irq(struct mcb_device *mdev)
 {
 	struct mcb_bus *mbus = mdev->bus;
@@ -86,7 +124,7 @@ static int mcb_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	priv->bus->get_irq = mcb_pci_get_irq;
 
-	ret = chameleon_parse_cells(priv->bus, priv->base);
+	ret = chameleon_parse_cells(priv->bus, priv->base, &cham_pci_ops);
 	if (ret < 0)
 		goto out_mcb_bus;
 
