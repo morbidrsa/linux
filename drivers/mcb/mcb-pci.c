@@ -86,7 +86,7 @@ static int mcb_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	priv->bus->get_irq = mcb_pci_get_irq;
 
-	ret = chameleon_parse_cells(priv->bus, priv->mapbase, priv->base);
+	ret = chameleon_parse_cells(priv->bus, priv->base);
 	if (ret < 0)
 		goto out_mcb_bus;
 

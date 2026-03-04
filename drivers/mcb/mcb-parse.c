@@ -6,6 +6,7 @@
 #include <linux/io.h>
 #include <linux/mcb.h>
 
+#include <linux/pci.h>
 #include "mcb-internal.h"
 
 #define for_each_chameleon_cell(dtype, p)	\
@@ -123,8 +124,8 @@ static void chameleon_parse_bar(void __iomem *base,
 	}
 }
 
-static int chameleon_get_bar(void __iomem **base, phys_addr_t mapbase,
-			     struct chameleon_bar **cb)
+static int chameleon_get_bar(void __iomem **base, struct chameleon_bar **cb,
+			     struct device *dev)
 {
 	struct chameleon_bar *c;
 	int bar_count;
@@ -153,12 +154,16 @@ static int chameleon_get_bar(void __iomem **base, phys_addr_t mapbase,
 		chameleon_parse_bar(*base, c, bar_count);
 		*base += BAR_DESC_SIZE(bar_count);
 	} else {
-		c = kzalloc_obj(struct chameleon_bar);
+		struct pci_dev *pdev = to_pci_dev(dev);
+
+		bar_count = PCI_STD_NUM_BARS;
+		c = kzalloc_objs(struct chameleon_bar, bar_count);
 		if (!c)
 			return -ENOMEM;
-
-		bar_count = 1;
-		c->addr = mapbase;
+		for (int i = 0; i < bar_count; ++i) {
+			c[i].addr = pci_resource_start(pdev, i);
+			c[i].size = pci_resource_len(pdev, i);
+		}
 	}
 
 	*cb = c;
@@ -166,8 +171,7 @@ static int chameleon_get_bar(void __iomem **base, phys_addr_t mapbase,
 	return bar_count;
 }
 
-int chameleon_parse_cells(struct mcb_bus *bus, phys_addr_t mapbase,
-			void __iomem *base)
+int chameleon_parse_cells(struct mcb_bus *bus, void __iomem *base)
 {
 	struct chameleon_fpga_header *header;
 	struct chameleon_bar *cb;
@@ -203,7 +207,7 @@ int chameleon_parse_cells(struct mcb_bus *bus, phys_addr_t mapbase,
 	memcpy(bus->name, header->filename, CHAMELEON_FILENAME_LEN);
 	bus->name[CHAMELEON_FILENAME_LEN] = '\0';
 
-	bar_count = chameleon_get_bar(&p, mapbase, &cb);
+	bar_count = chameleon_get_bar(&p, &cb, bus->carrier);
 	if (bar_count < 0) {
 		ret = bar_count;
 		goto free_header;

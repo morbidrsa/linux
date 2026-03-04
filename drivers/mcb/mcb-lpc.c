@@ -56,7 +56,7 @@ static int mcb_lpc_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->bus))
 		return PTR_ERR(priv->bus);
 
-	ret = chameleon_parse_cells(priv->bus, priv->mem->start, priv->base);
+	ret = chameleon_parse_cells(priv->bus, priv->base);
 	if (ret < 0) {
 		goto out_mcb_bus;
 	}
