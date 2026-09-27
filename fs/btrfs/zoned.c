@@ -1977,7 +1977,10 @@ int btrfs_load_block_group_zone_info(struct btrfs_block_group *cache, bool new)
 		} else if (map->num_stripes == num_conventional) {
 			cache->alloc_offset = last_alloc;
 			cache->zone_capacity = cache->length;
-			set_bit(BLOCK_GROUP_FLAG_ZONE_IS_ACTIVE, &cache->runtime_flags);
+
+			if (btrfs_zoned_bg_is_append_only(cache))
+				set_bit(BLOCK_GROUP_FLAG_ZONE_IS_ACTIVE,
+					&cache->runtime_flags);
 			goto out;
 		}
 	}
@@ -2447,6 +2450,9 @@ bool btrfs_zone_activate(struct btrfs_block_group *block_group)
 		return true;
 
 	if (unlikely(btrfs_is_testing(fs_info)))
+		return true;
+
+	if (!btrfs_zoned_bg_is_append_only(block_group))
 		return true;
 
 	map = block_group->physical_map;
@@ -3046,6 +3052,8 @@ int btrfs_zoned_activate_one_bg(struct btrfs_space_info *space_info, bool do_fin
 		for (index = 0; index < BTRFS_NR_RAID_TYPES; index++) {
 			list_for_each_entry(bg, &space_info->block_groups[index],
 					    list) {
+				if (!btrfs_zoned_bg_is_append_only(bg))
+					continue;
 				if (!spin_trylock(&bg->lock))
 					continue;
 				if (btrfs_zoned_bg_is_full(bg) ||
