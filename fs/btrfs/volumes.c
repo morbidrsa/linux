@@ -5889,6 +5889,20 @@ static void init_alloc_chunk_ctl(struct btrfs_fs_devices *fs_devices,
 	}
 }
 
+/*
+ * Metadata and system chunks are preferably placed on conventional zones.
+ * Those can be overwritten in place, so such block groups do not need the
+ * append-only zoned allocation and writeback paths.
+ */
+static bool prefer_conventional_zones(const struct btrfs_fs_devices *fs_devices,
+				      const struct alloc_chunk_ctl *ctl)
+{
+	if (fs_devices->chunk_alloc_policy != BTRFS_CHUNK_ALLOC_ZONED)
+		return false;
+
+	return !(ctl->type & BTRFS_BLOCK_GROUP_DATA);
+}
+
 static int gather_device_info(struct btrfs_fs_devices *fs_devices,
 			      struct alloc_chunk_ctl *ctl,
 			      struct btrfs_device_info *devices_info)
@@ -5897,11 +5911,14 @@ static int gather_device_info(struct btrfs_fs_devices *fs_devices,
 	struct btrfs_device *device;
 	u64 total_avail;
 	u64 dev_extent_want = ctl->max_stripe_size * ctl->dev_stripes;
+	bool conv = prefer_conventional_zones(fs_devices, ctl);
 	int ret;
-	int ndevs = 0;
+	int ndevs;
 	u64 max_avail;
 	u64 dev_offset;
 
+again:
+	ndevs = 0;
 	/*
 	 * in the first pass through the devices list, we gather information
 	 * about the available holes on each device.
@@ -5928,7 +5945,7 @@ static int gather_device_info(struct btrfs_fs_devices *fs_devices,
 			continue;
 
 		ret = find_free_dev_extent(device, dev_extent_want, &dev_offset,
-					   &max_avail, false);
+					   &max_avail, conv);
 		if (ret && ret != -ENOSPC)
 			return ret;
 
@@ -5955,6 +5972,16 @@ static int gather_device_info(struct btrfs_fs_devices *fs_devices,
 		devices_info[ndevs].dev = device;
 		++ndevs;
 	}
+
+	/*
+	 * Not enough free conventional zones to satisfy the allocation profile,
+	 * fall back to searching all zones.
+	 */
+	if (conv && rounddown(ndevs, ctl->devs_increment) < ctl->devs_min) {
+		conv = false;
+		goto again;
+	}
+
 	ctl->ndevs = ndevs;
 
 	/*
