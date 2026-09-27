@@ -2548,16 +2548,15 @@ static int write_meta_extent_buffer(struct btrfs_eb_write_context *ctx,
 /*
  * On a zoned filesystem, write out the currently dirty metadata extent buffers
  * of @bg. Used to flush the active metadata/system block group before the
- * ascending-address walk in btree_writepages(), so that walk can pivot the
- * active block group away (finishing it) instead of aborting the commit; see
- * the caller for details.
+ * ascending-address walk in btree_writepages() writes any append only metadata,
+ * so that walk can pivot the active block group away (finishing it) instead of
+ * aborting the commit; see btrfs_flush_active_meta_bgs() for details.
  */
-static void flush_active_meta_bg(struct address_space *mapping,
+static void flush_active_meta_bg(struct btrfs_fs_info *fs_info,
 				 struct writeback_control *wbc,
 				 struct btrfs_eb_write_context *ctx,
 				 struct btrfs_block_group *bg)
 {
-	struct btrfs_fs_info *fs_info = inode_to_fs_info(mapping->host);
 	unsigned long index = bg->start >> fs_info->nodesize_bits;
 	unsigned long end = (btrfs_block_group_end(bg) - 1) >> fs_info->nodesize_bits;
 	struct eb_batch batch;
@@ -2590,6 +2589,38 @@ static void flush_active_meta_bg(struct address_space *mapping,
 		eb_batch_release(&batch);
 		cond_resched();
 	}
+}
+
+/*
+ * On a zoned filesystem, flush the currently active metadata/system block
+ * group(s), so the ascending-address walk in btree_writepages() can pivot the
+ * active block group instead of aborting the transaction commit with -EAGAIN.
+ *
+ * Called by btrfs_zoned_meta_write_lock() when a WB_SYNC_ALL && !for_sync walk
+ * first takes fs_info::zoned_meta_io_lock. The lock is then held until the walk
+ * is done, so no other writeback can activate a block group and leave unsent IO
+ * behind in the meantime.
+ *
+ * Use a separate write context, so the flush does not clobber the extent
+ * buffer and block group of the walk that took the lock.
+ */
+void btrfs_flush_active_meta_bgs(struct btrfs_fs_info *fs_info,
+				 struct writeback_control *wbc)
+{
+	struct btrfs_eb_write_context ctx = {
+		.wbc = wbc,
+		.meta_io_locked = true,
+	};
+
+	lockdep_assert_held(&fs_info->zoned_meta_io_lock);
+
+	if (fs_info->active_meta_bg)
+		flush_active_meta_bg(fs_info, wbc, &ctx, fs_info->active_meta_bg);
+	if (fs_info->active_system_bg)
+		flush_active_meta_bg(fs_info, wbc, &ctx, fs_info->active_system_bg);
+
+	if (ctx.zoned_bg)
+		btrfs_put_block_group(ctx.zoned_bg);
 }
 
 int btree_writepages(struct address_space *mapping, struct writeback_control *wbc)
@@ -2626,23 +2657,6 @@ int btree_writepages(struct address_space *mapping, struct writeback_control *wb
 		tag = PAGECACHE_TAG_TOWRITE;
 	else
 		tag = PAGECACHE_TAG_DIRTY;
-	btrfs_zoned_meta_io_lock(fs_info);
-
-	/*
-	 * On a zoned filesystem, flush the currently active metadata/system
-	 * block group(s) first, under this same lock, so the ascending-address
-	 * walk below can pivot the active block group instead of aborting the
-	 * transaction commit with -EAGAIN.
-	 */
-	if (btrfs_is_zoned(fs_info) && wbc->sync_mode == WB_SYNC_ALL &&
-	    !wbc->for_sync) {
-		if (fs_info->active_meta_bg)
-			flush_active_meta_bg(mapping, wbc, &ctx,
-					     fs_info->active_meta_bg);
-		if (fs_info->active_system_bg)
-			flush_active_meta_bg(mapping, wbc, &ctx,
-					     fs_info->active_system_bg);
-	}
 retry:
 	if (wbc->sync_mode == WB_SYNC_ALL)
 		buffer_tree_tag_for_writeback(fs_info, index, end);
@@ -2685,7 +2699,7 @@ retry:
 
 	if (ctx.zoned_bg)
 		btrfs_put_block_group(ctx.zoned_bg);
-	btrfs_zoned_meta_io_unlock(fs_info);
+	btrfs_zoned_meta_write_unlock(fs_info, &ctx);
 	return ret;
 }
 

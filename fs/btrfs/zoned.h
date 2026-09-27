@@ -77,6 +77,8 @@ bool btrfs_use_zone_append(struct btrfs_bio *bbio);
 void btrfs_record_physical_zoned(struct btrfs_bio *bbio);
 int btrfs_check_meta_write_pointer(struct btrfs_fs_info *fs_info,
 				   struct btrfs_eb_write_context *ctx);
+void btrfs_zoned_meta_write_unlock(struct btrfs_fs_info *fs_info,
+				   struct btrfs_eb_write_context *ctx);
 bool btrfs_meta_is_append_only(struct btrfs_fs_info *fs_info, u64 logical);
 int btrfs_zoned_issue_zeroout(struct btrfs_device *device, u64 physical, u64 length);
 int btrfs_sync_zone_write_pointer(struct btrfs_device *tgt_dev, u64 logical,
@@ -215,6 +217,9 @@ static inline int btrfs_check_meta_write_pointer(struct btrfs_fs_info *fs_info,
 {
 	return 0;
 }
+
+static inline void btrfs_zoned_meta_write_unlock(struct btrfs_fs_info *fs_info,
+						 struct btrfs_eb_write_context *ctx) { }
 
 static inline bool btrfs_meta_is_append_only(struct btrfs_fs_info *fs_info,
 					     u64 logical)
