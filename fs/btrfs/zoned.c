@@ -2268,6 +2268,35 @@ static bool check_bg_is_active(struct btrfs_eb_write_context *ctx,
 }
 
 /*
+ * Serialize the append only metadata writeback of this filesystem.
+ *
+ * The lock protects block_group::meta_write_pointer and
+ * fs_info::active_{meta,system}_bg. It is taken lazily, on the first extent
+ * buffer that lives in an append only block group, and is dropped by
+ * btrfs_zoned_meta_write_unlock() once the writeback walk is done. Metadata
+ * that is written in place does not need it.
+ */
+void btrfs_zoned_meta_write_lock(struct btrfs_fs_info *fs_info,
+				 struct btrfs_eb_write_context *ctx)
+{
+	if (ctx->meta_io_locked)
+		return;
+
+	mutex_lock(&fs_info->zoned_meta_io_lock);
+	ctx->meta_io_locked = true;
+}
+
+void btrfs_zoned_meta_write_unlock(struct btrfs_fs_info *fs_info,
+				   struct btrfs_eb_write_context *ctx)
+{
+	if (!ctx->meta_io_locked)
+		return;
+
+	ctx->meta_io_locked = false;
+	mutex_unlock(&fs_info->zoned_meta_io_lock);
+}
+
+/*
  * Check if @ctx->eb is aligned to the write pointer.
  *
  * Return:
@@ -2303,6 +2332,8 @@ int btrfs_check_meta_write_pointer(struct btrfs_fs_info *fs_info,
 
 	if (!btrfs_zoned_bg_is_append_only(block_group))
 		return 0;
+
+	btrfs_zoned_meta_write_lock(fs_info, ctx);
 
 	if (block_group->meta_write_pointer == eb->start) {
 		struct btrfs_block_group **tgt;

@@ -2626,16 +2626,22 @@ int btree_writepages(struct address_space *mapping, struct writeback_control *wb
 		tag = PAGECACHE_TAG_TOWRITE;
 	else
 		tag = PAGECACHE_TAG_DIRTY;
-	btrfs_zoned_meta_io_lock(fs_info);
 
 	/*
 	 * On a zoned filesystem, flush the currently active metadata/system
-	 * block group(s) first, under this same lock, so the ascending-address
-	 * walk below can pivot the active block group instead of aborting the
-	 * transaction commit with -EAGAIN.
+	 * block group(s) first, under the metadata writeback lock, so the
+	 * ascending-address walk below can pivot the active block group instead
+	 * of aborting the transaction commit with -EAGAIN.
+	 *
+	 * The active block group pointers are only ever set for append only
+	 * block groups, so peek at them before taking the lock and re-check
+	 * them once it is held.
 	 */
 	if (btrfs_is_zoned(fs_info) && wbc->sync_mode == WB_SYNC_ALL &&
-	    !wbc->for_sync) {
+	    !wbc->for_sync &&
+	    (READ_ONCE(fs_info->active_meta_bg) ||
+	     READ_ONCE(fs_info->active_system_bg))) {
+		btrfs_zoned_meta_write_lock(fs_info, &ctx);
 		if (fs_info->active_meta_bg)
 			flush_active_meta_bg(mapping, wbc, &ctx,
 					     fs_info->active_meta_bg);
@@ -2685,7 +2691,7 @@ retry:
 
 	if (ctx.zoned_bg)
 		btrfs_put_block_group(ctx.zoned_bg);
-	btrfs_zoned_meta_io_unlock(fs_info);
+	btrfs_zoned_meta_write_unlock(fs_info, &ctx);
 	return ret;
 }
 
